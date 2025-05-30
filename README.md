@@ -1,39 +1,39 @@
-# OpenPosta-worker — Cloudflare邮局后端
+# OpenPosta-worker
 
-**OpenPosta** 是一个基于 [Cloudflare Email Workers](https://developers.cloudflare.com/email-routing/email-workers/)、[D1 数据库](https://developers.cloudflare.com/d1/)和 [Resend API](https://resend.com/) 实现的轻量级 Web 邮局服务。
-支持自定义邮箱账号管理、微级权限控制、邮件收发、管理员后台。
+**OpenPosta** is a lightweight webmail backend system powered by [Cloudflare Email Workers](https://developers.cloudflare.com/email-routing/email-workers/) and [D1 Database](https://developers.cloudflare.com/d1/).
+It provides a simple, serverless mail service for managing inboxes, sending messages, and handling admin/user permissions. Outbound email is supported via [Resend](https://resend.com/).
 
----
-
-## ✨ 功能特性
-
-* 无服务器 Cloudflare Worker 原生架构
-* D1 数据库存储账号/邮件/权限
-* 支持邮箱账号注册/删除/权限编辑
-* 邮件收件箱、发件箱、写信、详情查询
-* 管理员后台登录/退出/账号管理
-* 外部邮件发送（Resend API）
-* API RESTful 接口，支持跨域 & Cookie 鉴权
+👉 中文说明：[README-ZH.md](./README-ZH.md)
 
 ---
 
-## 📁 项目结构
+## ✨ Features
 
-```text
-.
-├──  worker.js              # Cloudflare Worker 后端主逻辑
-├──  src/
-│   └── postal-mime.js     # 邮件分析库
-└──  README.md              # 本文档
+* Serverless architecture using Cloudflare Workers
+* D1 database to store user accounts, emails, and permissions
+* Inbox and outbox management, email details, and sending
+* Admin backend with login/logout/account management
+* Supports external email delivery via Resend API
+* Full REST API with CORS and cookie-based authentication
+
+---
+
+## 📁 Structure
+
+```
+├── worker.js             # Main Cloudflare Worker logic
+├── src/
+│   └── postal-mime.js   # Used for parsing raw email (via PostalMime)
+└── README.md             # English documentation (this file)
 ```
 
 ---
 
-## 🚀 快速部署
+## 🚀 Deployment Steps
 
-### 1. 初始化 D1 数据库
+### 1. D1 Schema Initialization
 
-执行 schema.sql:
+Create tables by executing `schema.sql`:
 
 ```sql
 CREATE TABLE IF NOT EXISTS admins (
@@ -66,63 +66,65 @@ CREATE TABLE IF NOT EXISTS mails (
 );
 ```
 
-### 2. 在 Cloudflare Workers 管理界面中
+### 2. Bind the Database
 
-* Bind D1 数据库，名称为 `DB`
-* 添加环境变量 `RESEND_API_KEY`
+In Cloudflare dashboard > Workers > Bindings > D1, bind your DB instance with the variable name `DB`.
 
----
+### 3. Add Environment Variable
 
-## ⚙️ API 接口列表
+Set the environment variable below to enable external mail sending:
 
-### 管理员
+* `RESEND_API_KEY` – your Resend API key
 
-| Method | Path           | 描述     |
-| ------ | -------------- | ------ |
-| POST   | /manage/login  | 登录     |
-| POST   | /manage/logout | 退出     |
-| GET    | /manage/check  | 查询状态   |
-| GET    | /manage/list   | 账号列表   |
-| POST   | /manage/add    | 新增邮箱账号 |
-| POST   | /manage/delete | 删除账号   |
-| POST   | /manage/update | 调整许可权限 |
-
-### 用户端
-
-| Method | Path               | 描述   |
-| ------ | ------------------ | ---- |
-| POST   | /user/login        | 登录   |
-| POST   | /user/logout       | 退出   |
-| GET    | /user/check        | 查询状态 |
-| GET    | /user/inbox        | 收件箱  |
-| GET    | /user/mail?id=     | 收件详情 |
-| GET    | /user/sent         | 发件箱  |
-| GET    | /user/sentmail?id= | 发件详情 |
-| POST   | /user/send         | 写信发送 |
-
-### 公共 API
-
-| Method | Path            | 描述     |
-| ------ | --------------- | ------ |
-| GET    | /api/list       | 最新邮件列表 |
-| GET    | /api/detail?id= | 邮件详情   |
+Without it, users can still receive and send emails internally.
 
 ---
 
-## 🔐 鉴权与安全
+## ⚙️ API Overview
 
-* 用户/管理员各自独立用 Cookie 鉴权
-* 仅有管理员可进行账号操作，用户无许可访问
-* CORS 支持跨域，需配合前端域名
+### Admin Endpoints (Cookie-based Auth)
+
+* `POST   /manage/login`       — Admin login
+* `POST   /manage/logout`      — Admin logout
+* `GET    /manage/check`       — Auth status check
+* `GET    /manage/list`        — List email accounts
+* `POST   /manage/add`         — Add new account
+* `POST   /manage/delete`      — Remove account
+* `POST   /manage/update`      — Update permissions
+
+### User Endpoints
+
+* `POST   /user/login`         — User login
+* `POST   /user/logout`        — Logout
+* `GET    /user/check`         — Check login status
+* `GET    /user/inbox`         — View inbox (self only)
+* `GET    /user/mail?id=`      — Read message detail
+* `GET    /user/sent`          — Sent emails
+* `GET    /user/sentmail?id=`  — Sent mail detail
+* `POST   /user/send`          — Send email (internal/external)
+
+### Public Read-Only APIs
+
+* `GET    /api/list`           — Latest emails
+* `GET    /api/detail?id=`     — Email detail by ID
 
 ---
 
-## 📌 扩展提示
+## 🔐 Authentication & Security
 
-* 邮件附件/格式支持可扩展
-* Resend 可替换为 Mailgun / SendGrid / MailChannels
-* 前端可配合 [jianMail UI](https://github.com/toewpq/jianMail)
+* Cookie-based session auth for admin and users
+* Role separation between admin/user
+* Strict CORS headers recommended: set `Access-Control-Allow-Origin` to your frontend domain
+* External sending limited to authorized users with valid API keys
 
 ---
 
-这是 OpenPosta 的后端实现文档，如需提供中文版 README 或前端部署指南，可再进一步维护。
+## 📌 Notes & Extensions
+
+* Easily extensible to support attachments, HTML templates, auditing, etc.
+* Resend API can be replaced with Mailgun, SendGrid, or custom SMTP provider
+* A frontend UI is available [here](https://github.com/toewpq/jianMail) for inbox/outbox access
+
+---
+
+© 2025 OpenJSW™/OpenPosta. Licensed under the MIT License.
