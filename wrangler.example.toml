@@ -1,0 +1,12 @@
+name = "openposta-worker"
+main = "worker.js"
+compatibility_date = "2025-05-30"
+
+[vars]
+RESEND_API_KEY = "your-resend-api-key"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "openposta-db"
+database_id = "your-d1-database-id"
+

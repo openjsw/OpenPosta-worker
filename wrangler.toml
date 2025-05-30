@@ -2,6 +2,9 @@ name = "openposta-worker"
 main = "worker.js"
 compatibility_date = "2025-05-30"
 
+[vars]
+RESEND_API_KEY = "re_5rJ4fccM_4jWaTzBwv6WEzWunWnhkTbqy"
+
 # 绑定 D1 数据库
 [[d1_databases]]
 binding = "DB"  # 对应代码中 env.DB
