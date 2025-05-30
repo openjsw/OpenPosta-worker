@@ -1,0 +1,3 @@
+name = "openposta-worker"
+main = "worker.js"
+compatibility_date = "2025-05-30"
