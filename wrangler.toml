@@ -1,0 +1,2 @@
+name = "openposta-worker"
+main = "worker.js"
