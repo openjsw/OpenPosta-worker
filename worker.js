@@ -11,13 +11,15 @@ function nanoid(size = 21) {
   return id;
 }
 
-// ========== CORS 配置 ==========
-const corsHeaders = {
-  "Access-Control-Allow-Origin": process.env.FRONTEND_URL, //修改成你的前端地址
-  "Access-Control-Allow-Methods": "GET,HEAD,POST,OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type",
-  "Access-Control-Allow-Credentials": "true"
-};
+// ========== 动态 CORS 配置 ==========
+function getCorsHeaders(origin) {
+  return {
+    "Access-Control-Allow-Origin": origin || "*",
+    "Access-Control-Allow-Methods": "GET,HEAD,POST,OPTIONS",
+    "Access-Control-Allow-Headers": "Content-Type",
+    "Access-Control-Allow-Credentials": "true"
+  };
+}
 
 // ========== 管理员cookie工具 ==========
 function getAdminToken(request) {
@@ -58,7 +60,8 @@ async function checkUserSession(env, request) {
 }
 
 // ========== D1未绑定提示 ==========
-function d1NotBindResponse() {
+function d1NotBindResponse(env) {
+  const corsHeaders = getCorsHeaders(env?.FRONTEND_URL);
   return new Response(
     JSON.stringify({
       error: "D1 数据库未绑定！请在 Cloudflare Worker 设置中绑定 D1 数据库（DB）后再使用本服务。",
@@ -79,9 +82,7 @@ async function sendByResend({ from, to, subject, text }, apiKey) {
       'Authorization': `Bearer ${apiKey}`,
       'Content-Type': 'application/json'
     },
-    body: JSON.stringify({
-      from, to, subject, text
-    })
+    body: JSON.stringify({ from, to, subject, text })
   });
   if (!resp.ok) {
     const detail = await resp.text();
@@ -91,17 +92,14 @@ async function sendByResend({ from, to, subject, text }, apiKey) {
 }
 
 export default {
-  // ========== 邮件入库（接收收件人邮件事件） ==========
   async email(message, env, ctx) {
-    if (!env.DB) return d1NotBindResponse();
+    if (!env.DB) return d1NotBindResponse(env);
 
-    // 判断收件人是否存在
     const mail_to = message.to;
-    const { results: toAccount } = await env.DB.prepare('SELECT * FROM accounts WHERE email = ? AND can_receive = 1').bind(mail_to).all();
-    if (!toAccount || !toAccount.length) {
-      // 邮箱不存在或禁止收信，拒收（退信）
-      throw new Error('邮箱不存在或不允许收件');
-    }
+    const { results: toAccount } = await env.DB.prepare(
+      'SELECT * FROM accounts WHERE email = ? AND can_receive = 1'
+    ).bind(mail_to).all();
+    if (!toAccount || !toAccount.length) throw new Error('邮箱不存在或不允许收件');
 
     try {
       const mail_from = message.from;
@@ -136,19 +134,16 @@ export default {
     }
   },
 
-  // ========== API/管理后台/用户端 ==========
   async fetch(request, env, ctx) {
-    if (!env.DB) return d1NotBindResponse();
+    if (!env.DB) return d1NotBindResponse(env);
+    const corsHeaders = getCorsHeaders(env.FRONTEND_URL);
+    const url = new URL(request.url);
+    const path = url.pathname;
 
-    // 跨域预检
     if (request.method === "OPTIONS") {
       return new Response(null, { headers: corsHeaders });
     }
 
-    const url = new URL(request.url);
-    const path = url.pathname;
-
-    // 管理员接口
     if (path === '/manage/login' && request.method === 'POST') {
       const { username, password } = await request.json();
       const { results } = await env.DB.prepare(
@@ -156,31 +151,44 @@ export default {
       ).bind(username, password).all();
       if (results && results.length) {
         const token = results[0].id;
-        let res = new Response(JSON.stringify({ success: true }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+        let res = new Response(JSON.stringify({ success: true }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" }
+        });
         setAdminCookie(res, token);
         return res;
       } else {
-        return new Response(JSON.stringify({ error: "用户名或密码错误" }), { status: 401, headers: corsHeaders });
+        return new Response(JSON.stringify({ error: "用户名或密码错误" }), {
+          status: 401, headers: corsHeaders
+        });
       }
     }
+
     if (path === '/manage/logout' && request.method === 'POST') {
-      let res = new Response(JSON.stringify({ success: true }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      let res = new Response(JSON.stringify({ success: true }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" }
+      });
       clearAdminCookie(res);
       return res;
     }
+
     if (path === '/manage/check') {
       const loggedIn = await checkAdminSession(env, request);
       return new Response(JSON.stringify({ loggedIn }), { headers: corsHeaders });
     }
+
     if (path.startsWith('/manage/') && !(await checkAdminSession(env, request))) {
-      return new Response(JSON.stringify({ error: "未登录" }), { status: 401, headers: corsHeaders });
+      return new Response(JSON.stringify({ error: "未登录" }), {
+        status: 401, headers: corsHeaders
+      });
     }
+
     if (path === '/manage/list') {
       const { results } = await env.DB.prepare(
         'SELECT id, email, can_send, can_receive, created_at FROM accounts ORDER BY created_at DESC'
       ).all();
       return new Response(JSON.stringify({ accounts: results }), { headers: corsHeaders });
     }
+
     if (path === '/manage/add' && request.method === 'POST') {
       const { email, password, can_send = 1, can_receive = 1 } = await request.json();
       const id = nanoid();
@@ -192,9 +200,13 @@ export default {
         ).bind(id, email, password, can_send ? 1 : 0, can_receive ? 1 : 0, created_at).run();
         return new Response(JSON.stringify({ success: true }), { headers: corsHeaders });
       } catch (e) {
-        return new Response(JSON.stringify({ error: '邮箱已存在或数据库错误', detail: e.message }), { status: 400, headers: corsHeaders });
+        return new Response(JSON.stringify({ error: '邮箱已存在或数据库错误', detail: e.message }), {
+          status: 400,
+          headers: corsHeaders
+        });
       }
     }
+
     if (path === '/manage/delete' && request.method === 'POST') {
       const { email } = await request.json();
       await env.DB.prepare(
@@ -202,6 +214,7 @@ export default {
       ).bind(email).run();
       return new Response(JSON.stringify({ success: true }), { headers: corsHeaders });
     }
+
     if (path === '/manage/update' && request.method === 'POST') {
       const { email, can_send, can_receive } = await request.json();
       const canSendVal = typeof can_send === 'undefined' ? 1 : (can_send ? 1 : 0);
@@ -212,7 +225,6 @@ export default {
       return new Response(JSON.stringify({ success: true }), { headers: corsHeaders });
     }
 
-    // 用户接口
     if (path === '/user/login' && request.method === 'POST') {
       const { email, password } = await request.json();
       const { results } = await env.DB.prepare(
@@ -220,27 +232,37 @@ export default {
       ).bind(email, password).all();
       if (results && results.length) {
         const token = results[0].id;
-        let res = new Response(JSON.stringify({ success: true }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+        let res = new Response(JSON.stringify({ success: true }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" }
+        });
         setUserCookie(res, token);
         return res;
       } else {
-        return new Response(JSON.stringify({ error: "邮箱或密码错误" }), { status: 401, headers: corsHeaders });
+        return new Response(JSON.stringify({ error: "邮箱或密码错误" }), {
+          status: 401,
+          headers: corsHeaders
+        });
       }
     }
+
     if (path === '/user/logout' && request.method === 'POST') {
-      let res = new Response(JSON.stringify({ success: true }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      let res = new Response(JSON.stringify({ success: true }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" }
+      });
       clearUserCookie(res);
       return res;
     }
+
     if (path === '/user/check') {
       const loggedIn = await checkUserSession(env, request);
       return new Response(JSON.stringify({ loggedIn }), { headers: corsHeaders });
     }
 
-    // 用户收件箱
     if (path === '/user/inbox') {
       if (!(await checkUserSession(env, request))) {
-        return new Response(JSON.stringify({ error: "未登录" }), { status: 401, headers: corsHeaders });
+        return new Response(JSON.stringify({ error: "未登录" }), {
+          status: 401, headers: corsHeaders
+        });
       }
       const token = getUserToken(request);
       const { results: accounts } = await env.DB.prepare('SELECT email FROM accounts WHERE id = ?').bind(token).all();
@@ -253,14 +275,16 @@ export default {
       return new Response(JSON.stringify({ mails: results }), { headers: corsHeaders });
     }
 
-    // 用户邮件详情
     if (path === '/user/mail' && request.method === 'GET') {
       if (!(await checkUserSession(env, request))) {
-        return new Response(JSON.stringify({ error: "未登录" }), { status: 401, headers: corsHeaders });
+        return new Response(JSON.stringify({ error: "未登录" }), {
+          status: 401, headers: corsHeaders
+        });
       }
       const id = url.searchParams.get('id');
-      if (!id) return new Response(JSON.stringify({ error: "缺少参数 id" }), { status: 400, headers: corsHeaders });
-      // 权限校验，只能看自己的邮件
+      if (!id) return new Response(JSON.stringify({ error: "缺少参数 id" }), {
+        status: 400, headers: corsHeaders
+      });
       const token = getUserToken(request);
       const { results: accounts } = await env.DB.prepare('SELECT email FROM accounts WHERE id = ?').bind(token).all();
       const email = accounts && accounts.length ? accounts[0].email : null;
@@ -270,15 +294,18 @@ export default {
       return new Response(JSON.stringify({ mail: results[0] || null }), { headers: corsHeaders });
     }
 
-    // 用户发件箱
     if (path === '/user/sent') {
       if (!(await checkUserSession(env, request))) {
-        return new Response(JSON.stringify({ error: "未登录" }), { status: 401, headers: corsHeaders });
+        return new Response(JSON.stringify({ error: "未登录" }), {
+          status: 401, headers: corsHeaders
+        });
       }
       const token = getUserToken(request);
       const { results: accounts } = await env.DB.prepare('SELECT email FROM accounts WHERE id = ?').bind(token).all();
       const email = accounts && accounts.length ? accounts[0].email : null;
-      if (!email) return new Response(JSON.stringify({ error: "账号异常" }), { status: 401, headers: corsHeaders });
+      if (!email) return new Response(JSON.stringify({ error: "账号异常" }), {
+        status: 401, headers: corsHeaders
+      });
 
       const { results } = await env.DB.prepare(
         `SELECT id, mail_to, subject, created_at FROM mails WHERE mail_from = ? ORDER BY created_at DESC LIMIT 20`
@@ -286,13 +313,16 @@ export default {
       return new Response(JSON.stringify({ mails: results }), { headers: corsHeaders });
     }
 
-    // 用户发件详情
     if (path === '/user/sentmail' && request.method === 'GET') {
       if (!(await checkUserSession(env, request))) {
-        return new Response(JSON.stringify({ error: "未登录" }), { status: 401, headers: corsHeaders });
+        return new Response(JSON.stringify({ error: "未登录" }), {
+          status: 401, headers: corsHeaders
+        });
       }
       const id = url.searchParams.get('id');
-      if (!id) return new Response(JSON.stringify({ error: "缺少参数 id" }), { status: 400, headers: corsHeaders });
+      if (!id) return new Response(JSON.stringify({ error: "缺少参数 id" }), {
+        status: 400, headers: corsHeaders
+      });
       const token = getUserToken(request);
       const { results: accounts } = await env.DB.prepare('SELECT email FROM accounts WHERE id = ?').bind(token).all();
       const email = accounts && accounts.length ? accounts[0].email : null;
@@ -302,25 +332,30 @@ export default {
       return new Response(JSON.stringify({ mail: results[0] || null }), { headers: corsHeaders });
     }
 
-    // 用户写信（发件）- 通过 Resend
     if (path === '/user/send' && request.method === 'POST') {
       if (!(await checkUserSession(env, request))) {
-        return new Response(JSON.stringify({ error: "未登录" }), { status: 401, headers: corsHeaders });
+        return new Response(JSON.stringify({ error: "未登录" }), {
+          status: 401, headers: corsHeaders
+        });
       }
+
       const { to, subject, body } = await request.json();
       const token = getUserToken(request);
       const { results: accounts } = await env.DB.prepare('SELECT email, can_send FROM accounts WHERE id = ?').bind(token).all();
       const fromAccount = accounts && accounts.length ? accounts[0] : null;
-      if (!fromAccount) return new Response(JSON.stringify({ error: "账号异常" }), { status: 401, headers: corsHeaders });
-      if (!fromAccount.can_send) return new Response(JSON.stringify({ error: "当前账号没有发信权限" }), { status: 403, headers: corsHeaders });
+      if (!fromAccount) return new Response(JSON.stringify({ error: "账号异常" }), {
+        status: 401, headers: corsHeaders
+      });
+      if (!fromAccount.can_send) return new Response(JSON.stringify({ error: "当前账号没有发信权限" }), {
+        status: 403, headers: corsHeaders
+      });
 
-      // 仅做简单邮箱格式校验
       if (!/^[^@]+@[^@]+\.[^@]+$/.test(to)) {
-        return new Response(JSON.stringify({ error: '收件人邮箱格式不正确' }), { status: 400, headers: corsHeaders });
+        return new Response(JSON.stringify({ error: '收件人邮箱格式不正确' }), {
+          status: 400, headers: corsHeaders
+        });
       }
 
-
-      // 发信（Resend）
       let sendOk = false, sendError = "";
       if (env.RESEND_API_KEY) {
         try {
@@ -335,9 +370,9 @@ export default {
           sendError = e.message || String(e);
         }
       } else {
-        sendOk = true; // 没配置API KEY时假发成功（本地测试用）
+        sendOk = true;
       }
-      // 邮件写入数据库
+
       const now = new Date().toISOString();
       const newMail = {
         id: nanoid(),
@@ -364,11 +399,12 @@ export default {
       if (sendOk) {
         return new Response(JSON.stringify({ success: true }), { headers: corsHeaders });
       } else {
-        return new Response(JSON.stringify({ error: sendError || "发信失败" }), { status: 500, headers: corsHeaders });
+        return new Response(JSON.stringify({ error: sendError || "发信失败" }), {
+          status: 500, headers: corsHeaders
+        });
       }
     }
 
-    // 开放邮件API
     if (path === "/api/list") {
       const { results } = await env.DB.prepare(
         `SELECT id, mail_from, mail_to, subject, created_at FROM mails ORDER BY created_at DESC LIMIT 20`
@@ -377,6 +413,7 @@ export default {
         headers: { ...corsHeaders, "Content-Type": "application/json" }
       });
     }
+
     if (path === "/api/detail") {
       const id = url.searchParams.get("id");
       if (!id) {
@@ -393,10 +430,9 @@ export default {
       });
     }
 
-    // 404
     return new Response(JSON.stringify({ error: "Not found" }), {
       status: 404,
       headers: { ...corsHeaders, "Content-Type": "application/json" }
     });
   }
-}
+};
