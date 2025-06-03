@@ -13,7 +13,7 @@ function nanoid(size = 21) {
 
 // ========== CORS 配置 ==========
 const corsHeaders = {
-  "Access-Control-Allow-Origin": "https://emails.openjsw.net", //修改成你的前端地址
+  "Access-Control-Allow-Origin": process.env.FRONTEND_URL, //修改成你的前端地址
   "Access-Control-Allow-Methods": "GET,HEAD,POST,OPTIONS",
   "Access-Control-Allow-Headers": "Content-Type",
   "Access-Control-Allow-Credentials": "true"
